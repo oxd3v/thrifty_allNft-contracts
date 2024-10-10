@@ -1,8 +1,37 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.11;
-// import "./Factory.sol";
-import "./CloneFactory.sol";
 
+
+contract CloneFactory {
+
+  function createClone(address target) internal returns (address result) {
+    bytes20 targetBytes = bytes20(target);
+    assembly {
+      let clone := mload(0x40)
+      mstore(clone, 0x3d602d80600a3d3981f3363d3d373d3d3d363d73000000000000000000000000)
+      mstore(add(clone, 0x14), targetBytes)
+      mstore(add(clone, 0x28), 0x5af43d82803e903d91602b57fd5bf30000000000000000000000000000000000)
+      result := create(0, clone, 0x37)
+    }
+  }
+
+  function isClone(address target, address query) internal view returns (bool result) {
+    bytes20 targetBytes = bytes20(target);
+    assembly {
+      let clone := mload(0x40)
+      mstore(clone, 0x363d3d373d3d3d363d7300000000000000000000000000000000000000000000)
+      mstore(add(clone, 0xa), targetBytes)
+      mstore(add(clone, 0x1e), 0x5af43d82803e903d91602b57fd5bf30000000000000000000000000000000000)
+
+      let other := add(clone, 0x40)
+      extcodecopy(query, other, 0, 0x2d)
+      result := and(
+        eq(mload(clone), mload(other)),
+        eq(mload(add(clone, 0xd)), mload(add(other, 0xd)))
+      )
+    }
+  }
+}
 library Address {
     function isContract(address account) internal view returns (bool) {
         return account.code.length > 0;
@@ -757,10 +786,10 @@ contract Main is Ownable, CloneFactory {
         IMarketFactory(subFactory).setCollectionInfo(collectionMetadata);
         IMarketFactory(subFactory).setMarketplace(address(this));
         IMarketFactory(subFactory).setFNFTMarketplace(
-            IMarketFactory(marketFactory).serviceMarketplace()
+            IMarketFactory(marketFactory).fNFTMarketplace()
         );
         IMarketFactory(subFactory).setServiceMarketplace(
-            IMarketFactory(marketFactory).fNFTMarketplace()
+            IMarketFactory(marketFactory).serviceMarketplace()
         );
         IMarketFactory(subFactory).setTier0(
             IMarketFactory(marketFactory).tier0Contract()
@@ -936,7 +965,7 @@ contract Main is Ownable, CloneFactory {
     }
 
     function _detect(address _contract)
-        public
+        private
         view
         returns (ContractType _type)
     {
@@ -962,7 +991,7 @@ contract Main is Ownable, CloneFactory {
         uint256 amount,
         bytes32 massage,
         bytes calldata sig
-    ) external isBlackList onlySigAuth(massage, sig) {
+    ) external isBlackList reentrancyGurd onlySigAuth(massage, sig) {
         require(listInfo[_key].maker != msg.sender && amount * price > 0,"Main:IV user or amount");
         //require(amount * price > 0, "Main:IV amount");
         require(
@@ -1024,7 +1053,7 @@ contract Main is Ownable, CloneFactory {
                 break;
             }
         }
-        require(amount > 0, "Main:invalid user");
+        require(amount > 0, "Main:invalid user"); 
         address coin = listInfo[_key].coin;
         IERC20(coin).safeTransfer(msg.sender, amount * price);
     }
@@ -1034,7 +1063,7 @@ contract Main is Ownable, CloneFactory {
         uint256 _amount,
         bytes32 massage,
         bytes calldata sig
-    ) external isBlackList reentrancyGurd onlySigAuth(massage, sig) {
+    ) external isBlackList reentrancyGurd onlySigAuth(massage, sig) {      
         require(listInfo[_key].maker != address(this), "Main:unlisted");
         require(
             listInfo[_key].maker != msg.sender &&
@@ -1043,7 +1072,7 @@ contract Main is Ownable, CloneFactory {
             "Main:IV maker"
         );
         require(listInfo[_key].amount >= _amount, "Main:overflow");
-        require(listInfo[_key].nftType != 3, "Main: No private nft");
+        require(listInfo[_key].nftType != 3, "Main:Buy pri.Nft  via Escrow");
         _trading(_key, _amount, listInfo[_key].price, msg.sender, true, false);
     }
 
@@ -1077,7 +1106,9 @@ contract Main is Ownable, CloneFactory {
 
     function claimEscrow(uint256 id) external isBlackList reentrancyGurd {
         require(
-            escrowList[id].state == EscrowStateType.ES_RELEASED || escrowList[id].createdAt + disputeDuration < block.timestamp && escrowList[id].state == EscrowStateType.ES_DISPUTE_OPEN,
+            escrowList[id].state == EscrowStateType.ES_RELEASED || 
+            escrowList[id].createdAt + disputeDuration < block.timestamp && 
+            escrowList[id].state == EscrowStateType.ES_DISPUTE_OPEN,
             "Main: IV escrow is not released yet"
         );
         bytes32 _key = escrowList[id].key;
@@ -1397,7 +1428,7 @@ contract Main is Ownable, CloneFactory {
         require(isExist, "Main:no user");
     }
 
-    function claim() external isBlackList {
+    function claim() external isBlackList reentrancyGurd{
         uint256 reward = IRedeemAndFee(redeemAndFee).unCliamedReward(
             msg.sender
         );
