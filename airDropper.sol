@@ -351,7 +351,7 @@ contract Gift20 {
         gift[_key].token = token;
         for (uint256 i; i < receivers.length; i++) {
             giftBalance[receivers[i]][_key].amount = amounts[i];
-            giftBalance[receivers[i]][_key].index = gifts[receivers[i]].length;
+            //giftBalance[receivers[i]][_key].index = gifts[receivers[i]].length;
             _spentAmount += amounts[i];
         }
         gift[_key].expireAt = block.timestamp.add(exp);
@@ -385,7 +385,6 @@ contract Gift20 {
             "GIFt20: Invalid Or expire Gift"
         );
         gift[_key].amount -= _bal;
-        
         delete giftBalance[msg.sender][_key];
         if (tax && !isTaxExempt[msg.sender]) {
             uint256 _tax = (_bal.mul(claimtax)).div(decimals);
@@ -394,6 +393,16 @@ contract Gift20 {
             _bal -= _tax;
         }
         TransferHelper.safeTransfer(gift[_key].token, msg.sender, _bal);
+    }
+
+    function extendDefaultGift(uint nDays) external onlyOwner  {
+        exp = nDays * 1 days;
+    }
+
+    function setTaxExempt(address[] calldata _holders, bool action) external onlyOwner {
+        for(uint i ; i < _holders.length; i++){
+            isTaxExempt[_holders[i]] = action;
+        }
     }
 
     // function claimAll(
@@ -445,13 +454,16 @@ contract Gift20 {
                 _bal > 0,
             "GIFT20: INvalid Caller"
         );
+        address coin = gift[_key].token;
+        delete gift[_key];
         if (tax) {
             uint256 _tax = (_bal.mul(senderTax)).div(decimals);
-            TransferHelper.safeTransfer(gift[_key].token, owner, _tax);
+            TransferHelper.safeTransfer(coin, owner, _tax);
             _bal -= _tax;
         }
-        TransferHelper.safeTransfer(gift[_key].token, msg.sender, _bal);
-        delete gift[_key];
+        
+        TransferHelper.safeTransfer(coin, msg.sender, _bal);
+        
     }
 
     function setTaxes(uint _senderTax, uint _claimTax, uint _decimals) external onlyOwner {
