@@ -1,7 +1,36 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.11;
 
-import "./cloneFactory.sol";
+contract CloneFactory {
+
+  function createClone(address target) internal returns (address result) {
+    bytes20 targetBytes = bytes20(target);
+    assembly {
+      let clone := mload(0x40)
+      mstore(clone, 0x3d602d80600a3d3981f3363d3d373d3d3d363d73000000000000000000000000)
+      mstore(add(clone, 0x14), targetBytes)
+      mstore(add(clone, 0x28), 0x5af43d82803e903d91602b57fd5bf30000000000000000000000000000000000)
+      result := create(0, clone, 0x37)
+    }
+  }
+
+  function isClone(address target, address query) internal view returns (bool result) {
+    bytes20 targetBytes = bytes20(target);
+    assembly {
+      let clone := mload(0x40)
+      mstore(clone, 0x363d3d373d3d3d363d7300000000000000000000000000000000000000000000)
+      mstore(add(clone, 0xa), targetBytes)
+      mstore(add(clone, 0x1e), 0x5af43d82803e903d91602b57fd5bf30000000000000000000000000000000000)
+
+      let other := add(clone, 0x40)
+      extcodecopy(query, other, 0, 0x2d)
+      result := and(
+        eq(mload(clone), mload(other)),
+        eq(mload(add(clone, 0xd)), mload(add(other, 0xd)))
+      )
+    }
+  }
+}
 
 library Address {
 
@@ -441,7 +470,6 @@ contract ServiceMarket is Ownable, CloneFactory {
         }
         sNftInfo[_key].coin = coin;
         uint _totalPrice;
-        sNftInfo[_key].price = price;
         for(uint i = 0; i < price.length; i++) {
             _totalPrice += price[i];
         }
@@ -456,21 +484,13 @@ contract ServiceMarket is Ownable, CloneFactory {
     function cancelSNFT(bytes32 _key) external isBlackList ReentrancyGurd{
         require(sNftInfo[_key].maker == msg.sender && !Dispute[_key], "SMain:not owner or disput opened");
         require(sNftInfo[_key].acceptId == sNftInfo[_key].releaseId, "Snft: can't cancel now");
-        sNftInfo[_key].maker = address(0);
-        sNftInfo[_key].collectionId = address(0);
-        sNftInfo[_key].tokenId = 0;
-        
-
-        //uint _totalPrice;
-        // for(uint i = 0; i < sNftInfo[_key].price.length; i++) {
-        //     _totalPrice += sNftInfo[_key].price[sNftInfo[_key].price.length-1];
-        //     sNftInfo[_key].price.pop();
-        // }
-        if(sNftInfo[_key].fund > 0){
-        IERC20(sNftInfo[_key].coin).safeTransfer(msg.sender, sNftInfo[_key].fund);
+        uint _fund = sNftInfo[_key].fund;
         sNftInfo[_key].fund = 0;
-        }
         sNftInfo[_key].isAlive = false;
+        if(_fund > 0){
+            IERC20(sNftInfo[_key].coin).safeTransfer(msg.sender, _fund);
+        }
+        
     }
 
     function SNFTAuction(bytes32 _key, uint[] memory price) external isBlackList ReentrancyGurd{
@@ -528,8 +548,9 @@ contract ServiceMarket is Ownable, CloneFactory {
             }
             require(isValid, "SMain:invalid user");
             sNftInfo[_key].confirmUser = user;
-            IERC20(sNftInfo[_key].coin).safeTransferFrom(msg.sender, address(this), takerPrice);
             sNftInfo[_key].fund = takerPrice;
+            IERC20(sNftInfo[_key].coin).safeTransferFrom(msg.sender, address(this), takerPrice);
+            
            
         // } else {
         //     // lancer accepts this milestone
@@ -537,13 +558,14 @@ contract ServiceMarket is Ownable, CloneFactory {
         // }
     }
 
-    function addDispute(bytes32 _key) external {
+    function addDispute(bytes32 _key) external ReentrancyGurd{
         require(msg.sender == sNftInfo[_key].maker || msg.sender == sNftInfo[_key].confirmUser, "Snft:Invalid actor");
+        require(sNftInfo[_key].releaseId < sNftInfo[_key].price.length, "SMain: exceed milestone");
         Dispute[_key] = true; 
     }
 
 
-    function resolveDispute(bytes32 _key, uint refund) external onlyOwner {
+    function resolveDispute(bytes32 _key, uint refund) external ReentrancyGurd onlyOwner {
         require(Dispute[_key], "No Dispute Opened");
         uint _price = 0;
         require(sNftInfo[_key].releaseId+1 <= sNftInfo[_key].price.length, "SMain: exceed milestone");
@@ -554,13 +576,13 @@ contract ServiceMarket is Ownable, CloneFactory {
         sNftInfo[_key].acceptId = sNftInfo[_key].releaseId;
         uint traseryAmount = _price * 3 / 100;
         uint refundAmount = ((_price - traseryAmount)*refund) / 10000;
+        sNftInfo[_key].fund -= _price;
+        Dispute[_key] = false; 
         if(refundAmount > 0){
            IERC20(sNftInfo[_key].coin).safeTransfer(sNftInfo[_key].maker, refundAmount); 
         }
         IERC20(sNftInfo[_key].coin).safeTransfer(sNftInfo[_key].confirmUser, _price - (traseryAmount + refundAmount));
         IERC20(sNftInfo[_key].coin).safeTransfer(treasury, traseryAmount);
-        sNftInfo[_key].fund -= _price;
-        Dispute[_key] = false; 
     }
 
     function cancelDispute(bytes32 _key) external onlyOwner {
@@ -571,7 +593,6 @@ contract ServiceMarket is Ownable, CloneFactory {
     function releaseMilestone(bytes32 _key) external isBlackList {
         require(msg.sender == sNftInfo[_key].maker, "SMain:not owner");
         require(true == sNftInfo[_key].isAlive, "SMain:not longer listed");
-        require(sNftInfo[_key].releaseId+1 <= sNftInfo[_key].price.length, "SMain: exceed milestone");
         sNftInfo[_key].releaseId ++;
     }
 
@@ -582,10 +603,11 @@ contract ServiceMarket is Ownable, CloneFactory {
         for (uint i = sNftInfo[_key].acceptId; i < sNftInfo[_key].releaseId; i++) {
             _price += sNftInfo[_key].price[i];
         }
+        sNftInfo[_key].fund -= _price;
         sNftInfo[_key].acceptId = sNftInfo[_key].releaseId;
         IERC20(sNftInfo[_key].coin).safeTransfer(msg.sender, _price * 97 / 100);
         IERC20(sNftInfo[_key].coin).safeTransfer(treasury, _price - _price * 97 / 100);
-        sNftInfo[_key].fund -= _price;
+        
     }
 
     function _unClassifiedList(address user) private view returns(bool) {
