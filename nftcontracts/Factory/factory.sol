@@ -1,7 +1,36 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.11;
 
-import "./cloneFactory.sol";
+contract CloneFactory {
+
+  function createClone(address target) internal returns (address result) {
+    bytes20 targetBytes = bytes20(target);
+    assembly {
+      let clone := mload(0x40)
+      mstore(clone, 0x3d602d80600a3d3981f3363d3d373d3d3d363d73000000000000000000000000)
+      mstore(add(clone, 0x14), targetBytes)
+      mstore(add(clone, 0x28), 0x5af43d82803e903d91602b57fd5bf30000000000000000000000000000000000)
+      result := create(0, clone, 0x37)
+    }
+  }
+
+  function isClone(address target, address query) internal view returns (bool result) {
+    bytes20 targetBytes = bytes20(target);
+    assembly {
+      let clone := mload(0x40)
+      mstore(clone, 0x363d3d373d3d3d363d7300000000000000000000000000000000000000000000)
+      mstore(add(clone, 0xa), targetBytes)
+      mstore(add(clone, 0x1e), 0x5af43d82803e903d91602b57fd5bf30000000000000000000000000000000000)
+
+      let other := add(clone, 0x40)
+      extcodecopy(query, other, 0, 0x2d)
+      result := and(
+        eq(mload(clone), mload(other)),
+        eq(mload(add(clone, 0xd)), mload(add(other, 0xd)))
+      )
+    }
+  }
+}
 
 interface IERC165 {
     function supportsInterface(bytes4 interfaceId) external view returns (bool);
@@ -718,8 +747,8 @@ contract MarketFactory is ERC1155, CloneFactory {
         require(_type < NFTtype.MAX, "MarketFactory: invalid type");
         if(_type == NFTtype.Tier0)
             require(user == address(this), "MarketFactory: tier0 not allow");
-        // if(_type == NFTtype.PRIVATE)
-        //     require(IRedeemAndFee(redeem).ableToCreatePrivateNFTforSale(user), "MarketFactory: private metadata not allow");
+        if(_type == NFTtype.PRIVATE)
+            require(IRedeemAndFee(redeem).ableToCreatePrivateNFTforSale(user), "MarketFactory: private metadata not allow");
         if(_type != NFTtype.FNFT)
             _tier0 = 0;
         else {
@@ -771,7 +800,10 @@ contract MarketFactory is ERC1155, CloneFactory {
         return newid;
     }
 
+  
+
     function updateRoyaltyFee(uint tokenId, uint8 _royaltyFee) external isBlackList {
+        require(userInfo[tokenId].user == msg.sender || IRedeemAndFee(IMarketplace(marketplace).redeemAndFee()).ableToViewALLPrivateMetadata(msg.sender), "FACTORY: invalid caller");
         userInfo[tokenId].royaltyFee = _royaltyFee;
     }
 
@@ -898,7 +930,7 @@ contract MarketFactory is ERC1155, CloneFactory {
     }
 
     function hasPermissionPrivateMetadata(uint tokenId, address user) public view returns(bool) {
-        return _privateMetadata[tokenId].ownerList[user];
+        return _privateMetadata[tokenId].ownerList[user];  
     }
 
     function viewPrivateMetadata(uint tokenId, address user) external view returns(string memory metadata, bool isEncrypt, bool isValid) {
@@ -956,3 +988,5 @@ contract MarketFactory is ERC1155, CloneFactory {
     }
 
 }
+
+
