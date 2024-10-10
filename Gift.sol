@@ -1,16 +1,4 @@
-/**
- *Submitted for verification at testnet.snowscan.xyz on 2024-08-20
-*/
 
-/**
- *Submitted for verification at testnet.snowscan.xyz on 2024-07-07
-*/
-
-/**
- *Submitted for verification at testnet.snowtrace.io on 2023-04-02
-*/
-
-// contracts/NFT.sol
 // SPDX-License-Identifier: MIT OR Apache-2.0
 pragma solidity 0.8.11;
 
@@ -610,6 +598,14 @@ contract Gift is ERC721URIStorage, Ownable {
     mapping(uint=>GiftInfo) public giftInfo;
     mapping(string => mapping(string => uint[])) socialGift;
 
+    bool isEntered;
+    modifier rentrancyGurd(){
+        require(!isEntered, "GIFT:Reentrancy");
+        isEntered = true;
+        _;
+        isEntered = false;
+    }
+
     constructor() ERC721("Gift", "Gft") {
     }
  
@@ -647,7 +643,7 @@ contract Gift is ERC721URIStorage, Ownable {
             }
         }
     
-    function createGift(address recipient, string memory uri, string[] memory key, string[] memory value, address coin, uint amount) external returns (uint256) {
+    function createGift(address recipient, string memory uri, string[] memory key, string[] memory value, address coin, uint amount) external rentrancyGurd returns (uint256) {
         require(key.length == value.length, "Gift:no matche name and value");
         require(recipient != address(0), "Gift:invalid secure mode");
             
@@ -708,7 +704,7 @@ contract Gift is ERC721URIStorage, Ownable {
         }
     }
 
-    function claimGift(uint tokenId, string[] memory key, string[] memory value, address recipient) external {
+    function claimGift(uint tokenId, string[] memory key, string[] memory value, address recipient) external rentrancyGurd{
         require(msg.sender == _giftcardSecureOwner, "Wrong owner");
         if(msg.sender != giftInfo[tokenId].taker) {
             require(key.length == value.length, "Gift:no matche name and value");
@@ -727,26 +723,29 @@ contract Gift is ERC721URIStorage, Ownable {
         
         address coin = giftInfo[tokenId].coin;
         uint amount = giftInfo[tokenId].amount;
-        IERC20(coin).safeTransfer(recipient, amount);
         if(!isCurrency[recipient][coin]){
            currency[recipient].push(coin);
            isCurrency[recipient][coin] = true;
         }
         receivedGift[recipient][coin] += amount;
         delete giftInfo[tokenId];
+        IERC20(coin).safeTransfer(recipient, amount);
     }
 
-    function claimSocialGift(uint _tokenId, string memory _key, string memory _address, address recipient) external {
+    function claimSocialGift(uint _tokenId, string memory _key, string memory _address, address recipient) external rentrancyGurd{
         require(msg.sender == _giftcardSecureOwner, "Wrong owner");
-        IERC20(giftInfo[_tokenId].coin).safeTransfer(recipient, giftInfo[_tokenId].amount);
         removeSocialGift(_tokenId, _key, _address);
+        uint amount = giftInfo[_tokenId].amount;
         delete giftInfo[_tokenId];
+        IERC20(giftInfo[_tokenId].coin).safeTransfer(recipient, amount);
+        
     }
 
-    function cancelGift(uint tokenId) external {
+    function cancelGift(uint tokenId) external rentrancyGurd{
         require(giftInfo[tokenId].maker == msg.sender, "Gift:invalid maker");
-        IERC20(giftInfo[tokenId].coin).safeTransfer(msg.sender, giftInfo[tokenId].amount);
+        uint _fund = giftInfo[tokenId].amount;
         delete giftInfo[tokenId];
+        IERC20(giftInfo[tokenId].coin).safeTransfer(msg.sender, _fund);   
     }
 
     function onERC721Received(
